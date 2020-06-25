@@ -1,0 +1,7 @@
+# Author  : Roge' Kuntz
+# Date    : 06/25/2020
+# Modified: 06/25/2020
+
+# Don't need object modules (.o) or lock files (.swp)
+*.o
+*.swp
