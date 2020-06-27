@@ -13,12 +13,14 @@
 /*#include <unistd.h>*/
 #include <time.h>
 
+#define TRUE 1
+#define FALSE 0
 #define MATRIX_MAX 4
 #define X_PINS 6, 13, 19, 26
 #define Y_PINS 12, 16, 20, 21
 #define MAX_BUTTON_DELAY 250000000 	// should trigger ~4 times a second at this delay. In ns
-#define MIN_BUTTON_DELAY 25000000	// should trigger ~40 times a second at this delay. In ns
-#define PIN_DELAY 0
+#define MIN_BUTTON_DELAY  50000000	// should trigger ~20 times a second at this delay. In ns
+#define BUTTON_DELAY_STEP 10000000
 
 int main(int argc, char** argv) {
    unsigned short int n;
@@ -28,10 +30,10 @@ int main(int argc, char** argv) {
    const int yPin[] = {Y_PINS};
    bool pressed;
    unsigned char yCount;
-   short int buttons;
+   unsigned char button;
+   unsigned char lastButton;
    struct timespec waitTime;
    struct timespec pinTime;
-   char* message;
 
    n = 0;
    waitTime.tv_sec = 0;
@@ -44,37 +46,44 @@ int main(int argc, char** argv) {
       loopMax = atoi(argv[1]);
       if (loopMax <= 1000) loopMax = 999;
    }
-   buttons = 0;
+   button = 0;
+   lastButton = 0;
    wiringPiSetupGpio();
    for (i = 0; i < MATRIX_MAX; i++) {
       pinMode(xPin[i], OUTPUT);
       pinMode(yPin[i], INPUT);
       digitalWrite(xPin[i], LOW);
       pullUpDnControl(yPin[i], PUD_UP);
-      // Wait for 150 cycles here?
    }
+   // Wait for 150 cycles here?
+   #pragma message("Warning: add code to force 150-cycle wait after changing pull-up state")
 
    while (1) {
-      pressed = 1;
+      pressed = FALSE;
       for (i = 0; i <  MATRIX_MAX; i++) {	// check all yPins, to see if any where pulled low
-         pressed &= digitalRead(yPin[i]);
+         if (!digitalRead(yPin[i])) {
+            pressed = TRUE;
+            break;
+         }
       }
-      if (pressed == 0) {
+      if (pressed) {
          for (i = 0; i < MATRIX_MAX; i++) {	// set all xpins to high, AKA won't pull ypins low.
             digitalWrite(xPin[i], HIGH);
          }
-         buttons = 0;
+         pressed = FALSE;
+         //buttons = 0;
          for (i = 0; i < MATRIX_MAX; i++) {
             digitalWrite(xPin[i], LOW);		// set the xpin we are checking to low
             // Waiting for the bare minimum amount of time seems to be enough
             nanosleep(&pinTime, NULL);	// delay, so can read right values from pins
             for (yCount = 0; yCount < MATRIX_MAX; yCount++) {
                if (digitalRead(yPin[yCount]) == 0) {
-                  if (buttons) {	// only one key press should be detected at a time. If more than one detected, ignore all.
-                     buttons = 0;
+                  if (pressed) {	// only one key press should be detected at a time. If more than one detected, ignore all.
+                     pressed = FALSE;
                      goto LOOPEND; // exit both loops if multiple keys were pressed
                   }
-                  buttons |= 1 << (i*4 + yCount);
+                  pressed = TRUE;
+                  button = i*4 + yCount;
                }
             }
             digitalWrite(xPin[i], HIGH);	// reset the xpin we finished checking to high
@@ -84,19 +93,34 @@ int main(int argc, char** argv) {
          for (i = 0; i < MATRIX_MAX; i++) {	// reset all xPins to low
             digitalWrite(xPin[i], LOW);
          }
-         if (buttons) {   // skip the rest of this loop if ignoring the button presses.
-            message = new char[43];   // 22 for 1st message part, 19 for binary num(16 "0/1"s, and 3 "."s), 1 for \n, 1 for null terminator
-            sprintf(message, "(%3d) Button Pressed: ", n + 1);
-            for (i = 0; i < MATRIX_MAX*MATRIX_MAX; i++) {
-               sprintf(message+22+i+(i/4), "%01d", (buttons >> i) & 1);
-               if ((i+1)%4 == 0) sprintf(message+22+i+(i/4)+1, ".");
-            }
-            sprintf(message+42, "\n");
-            printf("%s", message);
+         if (pressed) {   // skip the rest of this loop if ignoring the button presses.
+            printf("(%3d) Button Pressed: %2d\n", n + 1, button);
             n++;
             if (n >= loopMax) break;
-         }
-      }
+            if (lastButton == button) {
+               // count down, decrease delay
+               if (waitTime.tv_nsec > MIN_BUTTON_DELAY) {
+                  waitTime.tv_nsec -= BUTTON_DELAY_STEP;
+               }
+               goto DONTRESETDELAY;
+            } /*else {
+               // reset delay
+               waitTime.tv_nsec = MAX_BUTTON_DELAY;
+            }*/
+            lastButton = button;
+         } /*else {	// if two buttons being pressed, reset delay
+            waitTime.tv_nsec = MAX_BUTTON_DELAY;
+         }*/
+      } /*else {	// if no buttons being pressed, reset delay
+         waitTime.tv_nsec = MAX_BUTTON_DELAY;
+      }*/
+      waitTime.tv_nsec = MAX_BUTTON_DELAY;
+      	// rest delay if:
+	//	two buttons pressed,
+	//	no buttons pressed,
+	//	or last button pressed not match this button
+      DONTRESETDELAY:
+	// skip reseting delay if: last button pressed is same as this button press
       nanosleep(&waitTime, NULL);
    }
    
