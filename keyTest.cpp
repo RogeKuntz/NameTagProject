@@ -4,7 +4,10 @@
 * Date created : 1/13/2020
 * Date modified: 6/26/2020
 * Purpose : Reads key presses from a 4x4 button matrix.
-*           Does this using a basic (crappy) method.
+*           Does this using a polling loop method.
+*           Plan to extend this to use rising/falling
+*           edge interrupts, and to interrupt/notify
+*           another process.
 ********************************************************/
 
 #include <wiringPi.h>
@@ -15,9 +18,9 @@
 
 #define TRUE 1
 #define FALSE 0
-#define MATRIX_MAX 4
-#define X_PINS 6, 13, 19, 26
-#define Y_PINS 12, 16, 20, 21
+#define MATRIX_MAX 4	// avoid using magic numbers
+#define X_PINS 6, 13, 19, 26	// the GPIO pin numbers for the output pins
+#define Y_PINS 12, 16, 20, 21	// the GPIO pin numbers for the input pins
 #define MAX_BUTTON_DELAY 250000000 	// should trigger ~4 times a second at this delay. In ns
 #define MIN_BUTTON_DELAY  50000000	// should trigger ~20 times a second at this delay. In ns
 #define BUTTON_DELAY_STEP 10000000
@@ -32,14 +35,10 @@ int main(int argc, char** argv) {
    unsigned char yCount;
    unsigned char button;
    unsigned char lastButton;
-   struct timespec waitTime;
-   struct timespec pinTime;
+   struct timespec waitTime = {0, MAX_BUTTON_DELAY};
+   struct timespec pinTime = {0,0};
 
    n = 0;
-   waitTime.tv_sec = 0;
-   waitTime.tv_nsec = MAX_BUTTON_DELAY;
-   pinTime.tv_sec = 0;
-   pinTime.tv_nsec = 0;
    if (argc < 2) {
       loopMax = 10;
    } else {
@@ -71,10 +70,11 @@ int main(int argc, char** argv) {
             digitalWrite(xPin[i], HIGH);
          }
          pressed = FALSE;
-         //buttons = 0;
          for (i = 0; i < MATRIX_MAX; i++) {
             digitalWrite(xPin[i], LOW);		// set the xpin we are checking to low
-            // Waiting for the bare minimum amount of time seems to be enough
+            // Waiting for the bare minimum amount of time seems to be enough.
+            // If multiple pins that are 1st in their row are pressed at the same time
+            // and this delay is not used, them may not read right.
             nanosleep(&pinTime, NULL);	// delay, so can read right values from pins
             for (yCount = 0; yCount < MATRIX_MAX; yCount++) {
                if (digitalRead(yPin[yCount]) == 0) {
